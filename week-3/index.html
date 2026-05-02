@@ -3,80 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>test</title>
+    <title>第四周：材质热切换</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a2e; }
-        canvas { display: block; }
+        canvas { display: block; cursor: pointer; }
     </style>
 </head>
 <body>
+
 <script type="importmap">
-{ "imports": {
-    "three": "https://unpkg.com/three@0.171.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.171.0/examples/jsm/"
-}}
+    { "imports": {
+        "three": "https://unpkg.com/three@0.171.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.171.0/examples/jsm/"
+    }}
 </script>
+
 <script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(3, 2, 5);
+    // 1. 三大核心
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(3, 2, 5);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
-document.body.appendChild(renderer.domElement);
+    // 2. 灯光
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(5, 10, 5); scene.add(dirLight);
+    const fillLight = new THREE.DirectionalLight(0x4488cc, 0.4);
+    fillLight.position.set(-3, 1, -3); scene.add(fillLight);
+    
+    // 3. 网格地面
+    scene.add(new THREE.GridHelper(4, 20, 0x444466, 0x222244));
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-const d = new THREE.DirectionalLight(0xffffff, 1.2);
-d.position.set(5, 10, 5);
-scene.add(d);
-const f = new THREE.DirectionalLight(0x4488cc, 0.4);
-f.position.set(-3, 1, -3);
-scene.add(f);
+    // 4. 轨道控制器
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.target.set(0, -0.3, 0);
+    controls.update();
 
-scene.add(new THREE.GridHelper(4, 20, 0x444466, 0x222244));
+    // 5. 加载模型并应用第一个材质
+    const loader = new GLTFLoader();
+    let chairModel = null;
+    let currentStyle = 0;
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.target.set(0, 0, 0);
-controls.update();
+    // 预设四种材质风格
+    const styles = [
+        { name: '原木', color: 0xd4a574, roughness: 0.65, metalness: 0.05 },
+        { name: '金属', color: 0xaaaabb, roughness: 0.25, metalness: 0.95 },
+        { name: '塑料', color: 0xcc4444, roughness: 0.40, metalness: 0.00 },
+        { name: '玻璃', color: 0x88ccff, roughness: 0.10, metalness: 0.10, transparent: true, opacity: 0.75 }
+    ];
 
-const loader = new GLTFLoader();
-loader.load('./chair.glb',
-    (gltf) => {
-        const model = gltf.scene;
-        model.position.set(0, -0.5, 0);
-        model.traverse((child) => {
+    loader.load(
+        './chair.glb',
+        (gltf) => {
+            chairModel = gltf.scene;
+            chairModel.position.set(0, -0.5, 0);
+            applyStyle(0); // 默认原木色
+            scene.add(chairModel);
+            console.log('✅ 椅子已加载，点击切换四种材质风格！');
+        },
+        (p) => { if (p.total) console.log(`📦 加载进度: ${(p.loaded / p.total * 100).toFixed(1)}%`); },
+        (e) => console.error('❌ 加载失败:', e)
+    );
+
+    // 给模型所有部件应用一种风格
+    function applyStyle(index) {
+        const style = styles[index];
+        if (!chairModel) return;
+        chairModel.traverse((child) => {
             if (child.isMesh) {
-                child.material = new THREE.MeshStandardMaterial({ color: 0xd4a574, roughness: 0.7, metalness: 0.1 });
+                child.material = new THREE.MeshStandardMaterial(style);
             }
         });
-        scene.add(model);
-        console.log('✅ 模型加载成功！');
-    },
-    (p) => { if (p.total) console.log(`📦 ${(p.loaded/p.total*100).toFixed(1)}%`); },
-    (e) => console.error('❌ 模型加载失败:', e)
-);
+        document.title = `椅子风格：${style.name}`;
+        console.log(`🎨 当前风格：${style.name}`);
+    }
 
-function animate() {
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-}
-animate();
+    // 6. 点击切换风格
+    window.addEventListener('click', () => {
+        if (!chairModel) return;
+        currentStyle = (currentStyle + 1) % styles.length;
+        applyStyle(currentStyle);
+    });
 
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+    // 7. 动画循环
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+    }
+    animate();
+
+    // 8. 窗口自适应
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 </script>
 </body>
 </html>
