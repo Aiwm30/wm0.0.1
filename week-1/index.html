@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的第一个Three.js立方体</title>
+    <style>
+        /* 去掉页面滚动条，让画布铺满整个窗口 */
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <!-- 通过CDN引入Three.js核心库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- 1. 创建场景、相机、渲染器 (Three.js的三大核心组件) ---
+        
+        // 场景：就像一个容器，用来存放所有3D物体
+        const scene = new THREE.Scene();
+        
+        // 相机：决定我们从哪个角度观察场景
+        // 参数: 视野角度(75), 宽高比, 近裁剪面(0.1), 远裁剪面(1000)
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        // 把相机往后移动5个单位，否则相机会和立方体重叠在一起
+        camera.position.z = 5;
+        
+        // 渲染器：负责把场景通过相机"画"到网页上
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight); // 设置渲染尺寸为窗口大小
+        document.body.appendChild(renderer.domElement);           // 把画布添加到页面中
+
+        // --- 2. 创建一个立方体 ---
+        
+        // 几何体：定义物体的形状 (这里是一个边长为1的立方体)
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        // 材质：定义物体的外观 (这里用绿色，0x00ff00是十六进制颜色码)
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        // 网格：将几何体和材质组合成一个完整的物体
+        const cube = new THREE.Mesh(geometry, material);
+        // 把立方体添加到场景中
+        scene.add(cube);
+
+        // --- 3. 动画循环：让立方体转起来 ---
+        
+        function animate() {
+            // requestAnimationFrame 会在浏览器下一次重绘前调用animate函数，形成流畅的60fps动画
+            requestAnimationFrame(animate);
+            
+            // 让立方体绕Y轴和X轴旋转
+            cube.rotation.x += 0.01;
+            cube.rotation.y += 0.01;
+            
+            // 渲染场景
+            renderer.render(scene, camera);
+        }
+        
+        // 启动动画
+        animate();
+
+        // --- 4. 处理窗口大小变化 (让画布自适应窗口) ---
+        
+        window.addEventListener('resize', function() {
+            camera.aspect = window.innerWidth / window.innerHeight; // 更新相机的宽高比
+            camera.updateProjectionMatrix();                        // 应用更新
+            renderer.setSize(window.innerWidth, window.innerHeight);// 更新渲染器尺寸
+        });
+    </script>
+</body>
+</html>
