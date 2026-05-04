@@ -99,7 +99,7 @@
     loader.setDRACOLoader(dracoLoader);   // ★ 把 Draco 解压器交给加载器
 
     loader.load(
-        './chair-compressed.glb',        // ★ 这是我们压缩过的模型
+        './chair-edited.glb',        // ★ 这是我们压缩过的模型
         (gltf) => {
             chairModel = gltf.scene;
             chairModel.position.set(0, -0.5, 0);
