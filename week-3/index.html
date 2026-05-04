@@ -3,14 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>第五周：弹跳动画</title>
+    <title>第六周：HDRI环境贴图与Draco压缩加载</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a2e; }
         canvas { display: block; cursor: pointer; }
+        #info {
+            position: absolute; bottom: 20px; left: 20px;
+            color: white; font-family: monospace; font-size: 14px;
+            background: rgba(0,0,0,0.6); padding: 8px 16px; border-radius: 4px;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
+<div id="info">正在加载模型和HDRI环境...</div>
 
+<!-- importmap -->
 <script type="importmap">
     { "imports": {
         "three": "https://unpkg.com/three@0.171.0/build/three.module.js",
@@ -18,18 +26,17 @@
     }}
 </script>
 
-<!-- ============================================================
-     GSAP：业界最强的 JavaScript 动画库
-     通俗比喻：给你的代码装上一个弹簧马达，能让任何数值平滑变化
-     ============================================================ -->
+<!-- GSAP -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 
 <script type="module">
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 
-    // 1. 三大核心
+    // ========== 1. 场景初始化 ==========
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(3, 2, 5);
@@ -37,106 +44,108 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.0;
     document.body.appendChild(renderer.domElement);
 
-    // 2. 灯光
-    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    dirLight.position.set(5, 10, 5); scene.add(dirLight);
-    const fillLight = new THREE.DirectionalLight(0x4488cc, 0.4);
-    fillLight.position.set(-3, 1, -3); scene.add(fillLight);
+    // ========== 2. 灯光（HDRI 负责环境光，这里只留微弱补光） ==========
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
 
-    // 3. 网格地面
+    // ========== 3. 网格地面 ==========
     scene.add(new THREE.GridHelper(4, 20, 0x444466, 0x222244));
 
-    // 4. 轨道控制器
+    // ========== 4. 轨道控制 ==========
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, -0.3, 0);
     controls.update();
 
-    // 5. 材质预设
+    // ========== 5. 材质风格预设 ==========
     const styles = [
         { name: '原木', color: 0xd4a574, roughness: 0.65, metalness: 0.05 },
         { name: '金属', color: 0xaaaabb, roughness: 0.25, metalness: 0.95 },
         { name: '塑料', color: 0xcc4444, roughness: 0.40, metalness: 0.00 },
         { name: '玻璃', color: 0x88ccff, roughness: 0.10, metalness: 0.10, transparent: true, opacity: 0.75 }
     ];
-
-    // 6. 加载模型
-    const loader = new GLTFLoader();
-    let chairModel = null;
     let currentStyle = 0;
-    let isAnimating = false; // 防连点标志位
+    let chairModel = null;
 
-    loader.load(
-        './chair.glb',
-        (gltf) => {
-            chairModel = gltf.scene;
-            // 记住：椅子的原始 Y 位置是整个弹跳动画的基准线
-            chairModel.position.set(0, -0.5, 0);
-            applyStyle(0);
-            scene.add(chairModel);
-            console.log('✅ 椅子已加载，点击让它跳起来！');
-        },
-        (p) => { if (p.total) console.log(`📦 ${(p.loaded / p.total * 100).toFixed(1)}%`); },
-        (e) => console.error('❌ 加载失败:', e)
-    );
-
-    // 应用材质风格
     function applyStyle(index) {
         const style = styles[index];
         if (!chairModel) return;
         chairModel.traverse(child => {
             if (child.isMesh) child.material = new THREE.MeshStandardMaterial(style);
         });
-        document.title = `椅子风格：${style.name}`;
+        document.getElementById('info').textContent = `🏛️ 当前风格：${style.name} | 点击切换`;
     }
 
-    // 7. 弹跳动画函数
+    // ========== 6. 加载 HDRI 环境贴图 ==========
+    new RGBELoader()
+        .setPath('')
+        .load('venice_sunset_1k.hdr', (texture) => {
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+            scene.environment = texture;
+            scene.background = texture;
+            scene.backgroundBlurriness = 0.3;
+            document.getElementById('info').textContent = '✅ HDRI环境已加载！正在加载模型...';
+        });
+
+    // ========== 7. 配置 Draco 解码器 ==========
+    const dracoLoader = new DRACOLoader();
+    dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+    dracoLoader.preload();
+
+    // ========== 8. 加载压缩模型（使用 DRACOLoader） ==========
+    const loader = new GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);   // ★ 把 Draco 解压器交给加载器
+
+    loader.load(
+        './chair-compressed.glb',        // ★ 这是我们压缩过的模型
+        (gltf) => {
+            chairModel = gltf.scene;
+            chairModel.position.set(0, -0.5, 0);
+            applyStyle(0);
+            scene.add(chairModel);
+            document.getElementById('info').textContent = '🎨 点击椅子切换材质！';
+        },
+        (p) => {
+            if (p.total) document.getElementById('info').textContent = `📦 加载中... ${(p.loaded / p.total * 100).toFixed(1)}%`;
+        },
+        (e) => {
+            document.getElementById('info').textContent = '❌ 模型加载失败！';
+            console.error('❌ 加载失败:', e);
+        }
+    );
+
+    // ========== 9. 弹跳动画（GSAP） ==========
+    let isAnimating = false;
     function bounceChair() {
         if (!chairModel || isAnimating) return;
-        // isAnimating：正在动画中，防止用户狂点时动画乱跳
-
-        isAnimating = true; // 锁定
-        const baseY = -0.5; // 原始地面高度
-
-        // gsap.to()：把物体的某个属性从当前值平滑过渡到目标值
-        // 参数1：目标对象（椅子的位置）
-        // 参数2：动画时长（秒）
-        // 参数3：配置项
+        isAnimating = true;
+        const baseY = -0.5;
         gsap.to(chairModel.position, {
-            y: baseY + 1.0,   // 先跳到上方 1 个单位
-            duration: 0.3,    // 持续时间 0.3 秒
-            ease: "power2.out", // 缓动函数：先快后慢
+            y: baseY + 1.0,
+            duration: 0.3,
+            ease: "power2.out",
             onComplete: () => {
-                // 到达最高点后，立刻落回原位
                 gsap.to(chairModel.position, {
                     y: baseY,
                     duration: 0.4,
-                    ease: "bounce.out", // bounce.out：弹跳缓动，落下时会产生弹簧般的回弹
-                    onComplete: () => {
-                        isAnimating = false; // 动画全部完成，解锁
-                    }
+                    ease: "bounce.out",
+                    onComplete: () => { isAnimating = false; }
                 });
             }
         });
     }
 
-    // 8. 点击事件：切换材质 + 触发弹跳
+    // ========== 10. 点击切换材质 + 弹跳 ==========
     window.addEventListener('click', (event) => {
-        if (!chairModel) return;
-
-        // 防止点到按钮等 UI 元素
-        if (event.target.tagName !== 'CANVAS') return;
-
+        if (!chairModel || event.target.tagName !== 'CANVAS') return;
         currentStyle = (currentStyle + 1) % styles.length;
         applyStyle(currentStyle);
-        bounceChair(); // 就是这个！
+        bounceChair();
     });
 
-    // 9. 动画循环
+    // ========== 11. 动画循环 ==========
     function animate() {
         requestAnimationFrame(animate);
         controls.update();
@@ -144,7 +153,7 @@
     }
     animate();
 
-    // 10. 窗口自适应
+    // ========== 12. 响应窗口大小变化 ==========
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
