@@ -2,8 +2,8 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>第八周：真实天气联动</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>第九周：真实天气联动 + 性能优化</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a2e; }
         canvas { display: block; cursor: pointer; }
@@ -24,22 +24,36 @@
         "three/addons/": "https://unpkg.com/three@0.171.0/examples/jsm/"
     }}
 </script>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 
 <script type="module">
+        // ============================================================
+    // 项目：世界模型交互式 3D 场景
+    // 功能：加载 AI 生成的椅子模型，支持材质切换、弹跳动画、HDRI 环境光照、天气联动
+    // 版本：v0.9.0
+    // 日期：2026-05-06
+    // ============================================================
     import * as THREE from 'three';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import Stats from 'three/addons/libs/stats.module.js';
 
+// ========== 性能监视器初始化 ==========
+const stats = new Stats();
+stats.showPanel(0);
+document.body.appendChild(stats.dom);
+stats.dom.style.left = '20px';
+stats.dom.style.top = '20px';
     // ========== 1. 场景初始化 ==========
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
     camera.position.set(3, 2, 5);
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
     document.body.appendChild(renderer.domElement);
@@ -266,6 +280,7 @@
         requestAnimationFrame(animate);
         controls.update();
         updateParticles(); // ★ 更新雨/雪粒子位置
+        stats.update(); // ★ 更新性能监视器
         renderer.render(scene, camera);
     }
     animate();
