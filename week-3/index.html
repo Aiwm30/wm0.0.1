@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>第六周：HDRI环境贴图与Draco压缩加载</title>
+    <title>第八周：真实天气联动</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a2e; }
         canvas { display: block; cursor: pointer; }
@@ -16,17 +16,14 @@
     </style>
 </head>
 <body>
-<div id="info">正在加载模型和HDRI环境...</div>
+<div id="info">正在获取天气数据...</div>
 
-<!-- importmap -->
 <script type="importmap">
     { "imports": {
         "three": "https://unpkg.com/three@0.171.0/build/three.module.js",
         "three/addons/": "https://unpkg.com/three@0.171.0/examples/jsm/"
     }}
 </script>
-
-<!-- GSAP -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 
 <script type="module">
@@ -47,10 +44,14 @@
     renderer.toneMappingExposure = 1.0;
     document.body.appendChild(renderer.domElement);
 
-    // ========== 2. 灯光（HDRI 负责环境光，这里只留微弱补光） ==========
-    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+    // ========== 2. 灯光（基础补光，会根据天气动态调整） ==========
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(5, 10, 5);
+    scene.add(dirLight);
 
-    // ========== 3. 网格地面 ==========
+    // ========== 3. 地面 ==========
     scene.add(new THREE.GridHelper(4, 20, 0x444466, 0x222244));
 
     // ========== 4. 轨道控制 ==========
@@ -75,10 +76,9 @@
         chairModel.traverse(child => {
             if (child.isMesh) child.material = new THREE.MeshStandardMaterial(style);
         });
-        document.getElementById('info').textContent = `🏛️ 当前风格：${style.name} | 点击切换`;
     }
 
-    // ========== 6. 加载 HDRI 环境贴图 ==========
+    // ========== 6. HDRI 环境贴图 ==========
     new RGBELoader()
         .setPath('')
         .load('venice_sunset_1k.hdr', (texture) => {
@@ -86,58 +86,46 @@
             scene.environment = texture;
             scene.background = texture;
             scene.backgroundBlurriness = 0.3;
-            document.getElementById('info').textContent = '✅ HDRI环境已加载！正在加载模型...';
         });
 
-    // ========== 7. 配置 Draco 解码器 ==========
+    // ========== 7. Draco + 模型加载 ==========
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
     dracoLoader.preload();
-
-    // ========== 8. 加载压缩模型（使用 DRACOLoader） ==========
     const loader = new GLTFLoader();
-    loader.setDRACOLoader(dracoLoader);   // ★ 把 Draco 解压器交给加载器
+    loader.setDRACOLoader(dracoLoader);
 
     loader.load(
-        './chair-edited.glb',        // ★ 这是我们压缩过的模型
+        './chair-compressed.glb',
         (gltf) => {
             chairModel = gltf.scene;
             chairModel.position.set(0, -0.5, 0);
             applyStyle(0);
             scene.add(chairModel);
-            document.getElementById('info').textContent = '🎨 点击椅子切换材质！';
+            fetchWeather(); // ★ 模型加载完成后，立即获取天气
         },
-        (p) => {
-            if (p.total) document.getElementById('info').textContent = `📦 加载中... ${(p.loaded / p.total * 100).toFixed(1)}%`;
-        },
-        (e) => {
-            document.getElementById('info').textContent = '❌ 模型加载失败！';
-            console.error('❌ 加载失败:', e);
-        }
+        (p) => { if (p.total) document.getElementById('info').textContent = `📦 加载中... ${(p.loaded / p.total * 100).toFixed(1)}%`; },
+        (e) => console.error('❌ 加载失败:', e)
     );
 
-    // ========== 9. 弹跳动画（GSAP） ==========
+    // ========== 8. 弹跳动画 ==========
     let isAnimating = false;
     function bounceChair() {
         if (!chairModel || isAnimating) return;
         isAnimating = true;
         const baseY = -0.5;
         gsap.to(chairModel.position, {
-            y: baseY + 1.0,
-            duration: 0.3,
-            ease: "power2.out",
+            y: baseY + 1.0, duration: 0.3, ease: "power2.out",
             onComplete: () => {
                 gsap.to(chairModel.position, {
-                    y: baseY,
-                    duration: 0.4,
-                    ease: "bounce.out",
+                    y: baseY, duration: 0.4, ease: "bounce.out",
                     onComplete: () => { isAnimating = false; }
                 });
             }
         });
     }
 
-    // ========== 10. 点击切换材质 + 弹跳 ==========
+    // ========== 9. 点击交互 ==========
     window.addEventListener('click', (event) => {
         if (!chairModel || event.target.tagName !== 'CANVAS') return;
         currentStyle = (currentStyle + 1) % styles.length;
@@ -145,15 +133,144 @@
         bounceChair();
     });
 
-    // ========== 11. 动画循环 ==========
+    // ========== 10. 天气数据获取与场景联动 ★★★ 本周核心 ★★★ ==========
+    async function fetchWeather() {
+        // ★ 请将下面的经纬度改为你的真实坐标
+        const lat = 26.6;   // ← 你的纬度
+        const lng = 106.71;  // ← 你的经度
+        const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current_weather=true`;
+
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+            const weatherCode = data.current_weather.weathercode;
+            const temp = data.current_weather.temperature;
+            applyWeatherEffect(weatherCode, temp);
+        } catch (error) {
+            console.error('天气获取失败，使用默认场景:', error);
+            document.getElementById('info').textContent = '⚠️ 天气数据获取失败，使用默认场景';
+        }
+    }
+
+    // ========== 11. 天气效果映射 ==========
+    function applyWeatherEffect(code, temp) {
+        // 清空旧粒子
+        if (window.weatherParticles) {
+            scene.remove(window.weatherParticles);
+            window.weatherParticles = null;
+        }
+
+        let weatherText = '';
+        let exposure = 1.0;
+        let ambientColor = 0xffffff;
+        let ambientIntensity = 0.4;
+
+        if (code === 0) { // 晴朗
+            ambientColor = 0xffeedd;   // 暖黄色
+            ambientIntensity = 0.7;
+            exposure = 1.4;
+            dirLight.color.set(0xffdd99);
+            dirLight.intensity = 1.5;
+            weatherText = `☀️ 晴朗 ${temp}°C`;
+        } else if (code >= 1 && code <= 3) { // 多云
+            ambientColor = 0xccddee;   // 冷白色
+            ambientIntensity = 0.5;
+            exposure = 0.9;
+            dirLight.color.set(0xffffff);
+            dirLight.intensity = 0.6;
+            weatherText = `⛅ 多云 ${temp}°C`;
+        } else if (code === 45 || code === 48) { // 雾/霜
+            scene.fog = new THREE.Fog(0xcccccc, 1, 15);
+            weatherText = `🌫️ 雾天 ${temp}°C`;
+        } else if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) { // 雨
+            ambientColor = 0x8899bb;
+            ambientIntensity = 0.4;
+            exposure = 0.7;
+            dirLight.intensity = 0.3;
+            createParticles('rain');
+            weatherText = `🌧️ 雨天 ${temp}°C`;
+        } else if (code >= 71 && code <= 77) { // 雪
+            ambientColor = 0xddeeff;
+            ambientIntensity = 0.5;
+            exposure = 0.8;
+            createParticles('snow');
+            weatherText = `❄️ 雪天 ${temp}°C`;
+        } else if (code === 95 || code === 96 || code === 99) { // 雷暴
+            ambientColor = 0x556688;
+            ambientIntensity = 0.3;
+            exposure = 0.5;
+            dirLight.intensity = 0.2;
+            createParticles('rain');
+            weatherText = `⛈️ 雷暴 ${temp}°C`;
+            // 闪电效果见性能优化提示
+        } else {
+            weatherText = `🌤️ 当前 ${temp}°C (code:${code})`;
+        }
+
+        // 应用环境光
+        ambientLight.color.set(ambientColor);
+        ambientLight.intensity = ambientIntensity;
+        renderer.toneMappingExposure = exposure;
+        // 非雾天清除雾效
+        if (code !== 45 && code !== 48) scene.fog = null;
+
+        document.getElementById('info').textContent = weatherText;
+    }
+
+    // ========== 12. 粒子系统（雨/雪） ==========
+    function createParticles(type) {
+        const particleCount = type === 'rain' ? 1000 : 500;
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(particleCount * 3);
+
+        for (let i = 0; i < particleCount * 3; i += 3) {
+            positions[i] = (Math.random() - 0.5) * 8;     // x: -4 ~ 4
+            positions[i+1] = Math.random() * 6;           // y: 0 ~ 6
+            positions[i+2] = (Math.random() - 0.5) * 8;   // z: -4 ~ 4
+        }
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+        const material = new THREE.PointsMaterial({
+            color: type === 'rain' ? 0xaaccff : 0xffffff,
+            size: type === 'rain' ? 0.03 : 0.08,
+            transparent: true,
+            opacity: 0.6,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const particles = new THREE.Points(geometry, material);
+        particles.userData = { type, speed: type === 'rain' ? 0.08 : 0.02 };
+        scene.add(particles);
+        window.weatherParticles = particles;
+    }
+
+    // 动画循环中更新粒子位置
+    function updateParticles() {
+        if (!window.weatherParticles) return;
+        const particles = window.weatherParticles;
+        const positions = particles.geometry.attributes.position.array;
+        const speed = particles.userData.speed;
+
+        for (let i = 0; i < positions.length; i += 3) {
+            positions[i+1] -= speed; // 向下移动
+            if (positions[i+1] < -0.5) {
+                positions[i+1] = 5.5;  // 重置到顶部
+            }
+        }
+        particles.geometry.attributes.position.needsUpdate = true;
+    }
+
+    // ========== 13. 动画循环 ==========
     function animate() {
         requestAnimationFrame(animate);
         controls.update();
+        updateParticles(); // ★ 更新雨/雪粒子位置
         renderer.render(scene, camera);
     }
     animate();
 
-    // ========== 12. 响应窗口大小变化 ==========
+    // ========== 14. 窗口自适应 ==========
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
